@@ -6,9 +6,12 @@ import { MODELS, buildInput } from "../../models";
 export const maxDuration = 300;
 
 export async function POST(req) {
-  if (!process.env.FAL_KEY) {
+  // Tolerate common paste mistakes in the env value: whitespace/newlines, quotes, a leading "FAL_KEY=" or "Key ".
+  const key = (process.env.FAL_KEY || "").trim().replace(/^FAL_KEY=/, "").replace(/^["']|["']$/g, "").replace(/^Key\s+/i, "").trim();
+  if (!key) {
     return Response.json({ error: "FAL_KEY is not set. Add it to .env (local) or Vercel env vars." }, { status: 500 });
   }
+  fal.config({ credentials: key });
   const b = await req.json().catch(() => ({}));
   const prompt = String(b.prompt || "").trim();
   if (!prompt) return Response.json({ error: "Prompt is required." }, { status: 400 });
