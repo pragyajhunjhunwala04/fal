@@ -9,7 +9,10 @@ export async function POST(req) {
   // Tolerate common paste mistakes in the env value: whitespace/newlines, quotes, a leading "FAL_KEY=" or "Key ".
   const key = (process.env.FAL_KEY || "").trim().replace(/^FAL_KEY=/, "").replace(/^["']|["']$/g, "").replace(/^Key\s+/i, "").trim();
   if (!key) {
-    return Response.json({ error: "FAL_KEY is not set. Add it to .env (local) or Vercel env vars." }, { status: 500 });
+    // Diagnostics only: names/lengths, never values.
+    const seen = Object.keys(process.env).filter((k) => /fal/i.test(k)).map((k) => `${k}(${process.env[k].length})`).join(", ") || "none";
+    const where = `env=${process.env.VERCEL_ENV || "local"} commit=${(process.env.VERCEL_GIT_COMMIT_SHA || "?").slice(0, 7)}`;
+    return Response.json({ error: `FAL_KEY is not set. Add it to .env (local) or Vercel env vars. [${where}; FAL vars seen: ${seen}]` }, { status: 500 });
   }
   fal.config({ credentials: key });
   const b = await req.json().catch(() => ({}));
