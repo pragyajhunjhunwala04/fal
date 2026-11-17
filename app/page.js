@@ -218,6 +218,11 @@ export default function Home() {
     e.preventDefault();
     if (loading || !fields) return;
     setError("");
+    const missing = fields.find((f) => f.required && (values[f.key] === "" || (Array.isArray(values[f.key]) && !values[f.key].length)));
+    if (missing) {
+      const isFile = missing.kind === "file" || missing.kind === "files";
+      return setError(isFile ? `${model.name} needs an input file for “${missing.label}”. Upload one, or switch to a text-only model.` : `“${missing.label}” is required.`);
+    }
     let input;
     try {
       input = toInput(fields, values);
@@ -249,6 +254,9 @@ export default function Home() {
   }
 
   const cats = MEDIA[media].cats.filter((c) => inMedia.some((m) => m.cat === c));
+  // Same model family without the input-file requirement, e.g. ".../edit" or ".../image-to-video" → text version.
+  const twinIds = model ? [model.id.replace(/\/(edit|image-to-[a-z0-9]+|reference-to-video)$/, ""), model.id.replace("image-to-", "text-to-")] : [];
+  const textTwin = model && !model.cat.startsWith("text-to") && catalog.find((m) => m.cat.startsWith("text-to") && twinIds.includes(m.id));
 
   return (
     <main>
@@ -296,6 +304,11 @@ export default function Home() {
                 <strong>{model.name}</strong> <span className="tag">{catLabel(model.cat)}</span>
                 <small className="hint" title={model.desc}>{model.desc}</small>
                 <a className="hint" href={`https://fal.ai/models/${model.id}`} target="_blank" rel="noreferrer">{model.id} ↗</a>
+                {textTwin && (
+                  <button type="button" className="btn small twin" onClick={() => pick(textTwin)}>
+                    No input file? Switch to {textTwin.name} ({catLabel(textTwin.cat)})
+                  </button>
+                )}
               </div>
             )}
             {!fields && !error && <p className="hint">Loading options…</p>}

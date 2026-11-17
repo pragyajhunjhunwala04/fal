@@ -107,3 +107,4 @@ details pre { background: var(--bg); border: 1px solid var(--line); border-radiu
   background-size: 200% 100%; animation: sh 1.4s infinite linear;
 }
 @keyframes sh { to { background-position: -200% 0; } }
+.twin { flex-basis: 100%; margin-top: 4px; color: var(--accent); border-color: var(--accent); background: transparent; white-space: normal; text-align: left; }
