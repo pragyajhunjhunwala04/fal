@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import Script from "next/script";
-import { MEDIA, catLabel, initialValue, toInput, findMedia } from "./lib/schema";
+import { MEDIA, catLabel, initialValue, toInput, findMedia, estimateCost } from "./lib/schema";
 
 const call = async (url, init) => {
   const res = await fetch(url, init);
@@ -157,7 +157,9 @@ function Field({ f, value, onChange }) {
   return <div className="field">{head}{help}{control}</div>;
 }
 
-function Output({ item, name }) {
+const usd = (n) => (n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(n < 1 ? 3 : 2)}`);
+
+function Output({ item, name, cost }) {
   return (
     <figure>
       {item.type === "image" && <img src={item.url} alt="" width={item.width} height={item.height} />}
@@ -167,6 +169,7 @@ function Output({ item, name }) {
       {item.type === "file" && <a className="filelink" href={item.url} target="_blank" rel="noreferrer">{item.file_name || item.url.split("/").pop()}</a>}
       <figcaption>
         <span>{item.width ? `${item.width}×${item.height}` : item.type}</span>
+        {cost != null && <span className="cost" title="Share of this generation's cost">{usd(cost.total)}{!cost.exact && " est."}</span>}
         <button className="btn small" onClick={() => download(item.url, name)}>Download ↓</button>
       </figcaption>
     </figure>
@@ -214,6 +217,20 @@ export default function Home() {
     }
   }
 
+  // Exact billed cost when the key allows it (may lag a few seconds), else an estimate from the unit price.
+  async function loadCost(res, tries = 0) {
+    try {
+      const c = await call(`/api/cost?model=${encodeURIComponent(res.model.id)}&id=${encodeURIComponent(res.id)}`);
+      const est = !c.exact && !c.unknown ? estimateCost(c, res.data, res.values, res.media) : null;
+      const total = c.exact ? c.total : est?.total;
+      setResult((cur) => (cur?.id === res.id ? { ...cur, cost: { ...c, total } } : cur));
+      // Billing records can lag; if the key can read them (not 401/403), retry a few times for the exact number.
+      if (!c.exact && c.billing !== 401 && c.billing !== 403 && tries < 3) setTimeout(() => loadCost(res, tries + 1), 5000);
+    } catch {
+      /* cost is best-effort */
+    }
+  }
+
   async function generate(e) {
     e.preventDefault();
     if (loading || !fields) return;
@@ -245,7 +262,9 @@ export default function Home() {
         const secs = Math.round((Date.now() - start) / 1000);
         setStatus(r.status === "IN_QUEUE" ? `In queue${r.queue_position != null ? ` (#${r.queue_position + 1})` : ""} · ${secs}s` : `Generating · ${secs}s`);
       } while (r.status !== "COMPLETED");
-      setResult({ data: r.data, media: findMedia(r.data), model });
+      const res = { data: r.data, media: findMedia(r.data), model, values: input, id: request_id };
+      setResult(res);
+      loadCost(res);
     } catch (x) {
       setError(x.message);
     } finally {
@@ -334,7 +353,7 @@ export default function Home() {
             <>
               <div className="images">
                 {result.media.map((x, i) => (
-                  <Output key={x.url + i} item={x} name={x.file_name || `fal-${result.data.seed ?? Date.now()}-${i}.${x.url.split("?")[0].split(".").pop()}`} />
+                  <Output key={x.url + i} item={x} cost={result.cost?.total != null ? { total: result.cost.total / result.media.length, exact: result.cost.exact } : null} name={x.file_name || `fal-${result.data.seed ?? Date.now()}-${i}.${x.url.split("?")[0].split(".").pop()}`} />
                 ))}
               </div>
               {!result.media.length && <p className="hint">No media in the response — see raw output below.</p>}
@@ -344,6 +363,19 @@ export default function Home() {
                 {result.data.seed != null && "seed" in values && (
                   <button className="link" onClick={() => setValues((s) => ({ ...s, seed: String(result.data.seed) }))}>reuse seed</button>
                 )}
+              </p>
+              <p className="meta">
+                {!result.cost && "Cost: checking…"}
+                {result.cost?.total != null && (
+                  <>
+                    Cost: <b className="cost">{usd(result.cost.total)}</b> {result.cost.exact ? "billed" : "estimated"}
+                    {result.cost.unit && ` · ${usd(result.cost.unit_price)} / ${result.cost.unit}`}
+                    {!result.cost.exact && result.cost.billing === 403 && " · exact cost needs a key with billing permission"}
+                  </>
+                )}
+                {result.cost && result.cost.total == null && (result.cost.unit
+                  ? `Cost: ${usd(result.cost.unit_price)} / ${result.cost.unit} (couldn't count units for this output)`
+                  : "Cost: not published for this model")}
               </p>
               <details>
                 <summary className="hint">Raw response</summary>

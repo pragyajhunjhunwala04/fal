@@ -120,3 +120,24 @@ export function mediaType(url, ct = "") {
   if (/gltf|glb/.test(ct) || /^(glb|gltf)$/.test(ext)) return "3d";
   return "file";
 }
+
+// Estimate a request's cost from the model's unit price and what it produced. Returns null if the unit isn't one we can count.
+export function estimateCost({ unit = "", unit_price }, data, values, media) {
+  const u = unit.toLowerCase();
+  const visual = media.filter((m) => m.type === "image" || m.type === "video" || m.type === "3d");
+  const n = Math.max(1, visual.length || media.length);
+  const secs =
+    data?.video?.duration ?? data?.audio?.duration ?? data?.duration ??
+    (parseFloat(values?.duration) || (values?.num_frames && (values.frames_per_second || values.frame_rate) ? values.num_frames / (values.frames_per_second || values.frame_rate) : NaN));
+  let qty;
+  if (/megapixel/.test(u)) qty = visual.reduce((s, m) => s + (m.width && m.height ? (m.width * m.height) / 1e6 : 1), 0) || n;
+  else if (/^(image|video|request|call|generation|output|model|mesh|clip)s?$/.test(u)) qty = n;
+  else if (/^seconds?$/.test(u) && Number.isFinite(secs)) qty = secs;
+  else if (/^minutes?$/.test(u) && Number.isFinite(secs)) qty = secs / 60;
+  else if (/characters?$/.test(u)) {
+    const per = parseFloat(u) || 1; // e.g. "1000 characters"
+    qty = String(values?.text ?? values?.prompt ?? "").length / per;
+  }
+  else return null;
+  return { total: qty * unit_price, quantity: qty };
+}

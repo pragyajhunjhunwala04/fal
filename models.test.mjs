@@ -28,3 +28,12 @@ assert.throws(() => toInput(sdFields, { loras: "{bad" }), /valid JSON/);
 const m = findMedia({ images: [{ url: "https://x/a.png" }], video: { url: "https://x/b.mp4" }, audio_url: "https://x/c.mp3", seed: 1 });
 assert.deepStrictEqual(m.map((x) => x.type), ["image", "video", "audio"]);
 console.log("ok");
+
+// cost estimates
+import { estimateCost } from "./app/lib/schema.js";
+assert.strictEqual(estimateCost({ unit: "images", unit_price: 0.025 }, {}, {}, [{ type: "image" }, { type: "image" }]).total, 0.05);
+assert.strictEqual(estimateCost({ unit: "seconds", unit_price: 0.1 }, {}, { duration: "8s" }, [{ type: "video" }]).total, 0.8);
+assert.strictEqual(estimateCost({ unit: "megapixels", unit_price: 0.02 }, {}, {}, [{ type: "image", width: 2000, height: 1000 }]).total, 0.04);
+assert.strictEqual(estimateCost({ unit: "gpu-hours", unit_price: 1 }, {}, {}, []), null);
+assert.strictEqual(estimateCost({ unit: "1000 characters", unit_price: 0.08 }, {}, { text: "x".repeat(500) }, [{ type: "audio" }]).total, 0.04);
+console.log("cost ok");
