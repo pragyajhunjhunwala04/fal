@@ -1,10 +1,30 @@
-// node models.test.mjs
+// node models.test.mjs  — checks spec→form conversion against live fal specs for a few tricky models.
 import assert from "node:assert";
-import { MODELS, buildInput, defaultsFor } from "./app/models.js";
+import { fieldsFromOpenapi, initialValue, toInput, findMedia } from "./app/lib/schema.js";
 
-const i = buildInput("fal-ai/flux/dev", "fox", { num_inference_steps: "999", seed: "42", image_size: "evil", hack: 1, output_format: "png" });
-assert.deepStrictEqual(i, { prompt: "fox", num_inference_steps: 50, seed: 42, output_format: "png" });
-assert.strictEqual(buildInput("fal-ai/veo3/fast", "x", { generate_audio: false }).generate_audio, false);
-assert.strictEqual(buildInput("fal-ai/ideogram/v3", "x", { style: "" }).style, undefined);
-for (const id in MODELS) buildInput(id, "x", defaultsFor(id)); // defaults are all valid
+const spec = async (id) => (await (await fetch(`https://api.fal.ai/v1/models?endpoint_id=${id}&expand=openapi-3.0`)).json()).models[0].openapi;
+const by = (fs) => Object.fromEntries(fs.map((f) => [f.key, f]));
+
+const kling = by(fieldsFromOpenapi(await spec("fal-ai/kling-video/v2.1/master/image-to-video")));
+assert.strictEqual(kling.image_url.kind, "file");
+assert.strictEqual(kling.image_url.accept, "image/*");
+assert.strictEqual(kling.duration.kind, "select");
+assert.strictEqual(kling.cfg_scale.kind, "range");
+
+const sdFields = fieldsFromOpenapi(await spec("fal-ai/stable-diffusion-v35-large"));
+const sd = by(sdFields);
+assert.strictEqual(sd.image_size.kind, "size");
+assert.strictEqual(sd.loras.kind, "json");
+assert.strictEqual(sd.sync_mode, undefined);
+assert.strictEqual(sdFields[0].key, "prompt");
+
+const vals = Object.fromEntries(sdFields.map((f) => [f.key, initialValue(f)]));
+const input = toInput(sdFields, { ...vals, prompt: "fox", image_size: '{"width":640,"height":480}', seed: "7" });
+assert.deepStrictEqual(input.image_size, { width: 640, height: 480 });
+assert.strictEqual(input.seed, 7);
+assert.strictEqual(input.loras, undefined); // empty default omitted
+assert.throws(() => toInput(sdFields, { loras: "{bad" }), /valid JSON/);
+
+const m = findMedia({ images: [{ url: "https://x/a.png" }], video: { url: "https://x/b.mp4" }, audio_url: "https://x/c.mp3", seed: 1 });
+assert.deepStrictEqual(m.map((x) => x.type), ["image", "video", "audio"]);
 console.log("ok");

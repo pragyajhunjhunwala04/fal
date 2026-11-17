@@ -1,29 +1,49 @@
 import { fal } from "@fal-ai/client";
-import { MODELS, buildInput } from "../../models";
+import { falKey, missingKey, isAllowedModel, fields } from "../../lib/fal";
 
-// FAL_KEY is read from env automatically (server-side only, never sent to the browser).
-// Video models can take a few minutes; 300s is the Vercel Hobby max.
-export const maxDuration = 300;
+// Uses fal's queue: POST submits and returns a request id, GET polls it. No request stays open for minutes,
+// so slow video models don't hit Vercel's function timeout.
+
+const fail = (e) =>
+  Response.json({ error: e.body?.detail ? JSON.stringify(e.body.detail) : e.message }, { status: e.status || 500 });
+
+function auth() {
+  const key = falKey();
+  if (!key) return missingKey();
+  fal.config({ credentials: key });
+}
 
 export async function POST(req) {
-  // Tolerate common paste mistakes in the env value: whitespace/newlines, quotes, a leading "FAL_KEY=" or "Key ".
-  const key = (process.env.FAL_KEY || "").trim().replace(/^FAL_KEY=/, "").replace(/^["']|["']$/g, "").replace(/^Key\s+/i, "").trim();
-  if (!key) {
-    // Diagnostics only: names/lengths, never values.
-    const seen = Object.keys(process.env).filter((k) => /fal/i.test(k)).map((k) => `${k}(${process.env[k].length})`).join(", ") || "none";
-    const where = `env=${process.env.VERCEL_ENV || "local"} commit=${(process.env.VERCEL_GIT_COMMIT_SHA || "?").slice(0, 7)}`;
-    return Response.json({ error: `FAL_KEY is not set. Add it to .env (local) or Vercel env vars. [${where}; FAL vars seen: ${seen}]` }, { status: 500 });
-  }
-  fal.config({ credentials: key });
+  const err = auth();
+  if (err) return err;
   const b = await req.json().catch(() => ({}));
-  const prompt = String(b.prompt || "").trim();
-  if (!prompt) return Response.json({ error: "Prompt is required." }, { status: 400 });
-  if (!Object.hasOwn(MODELS, b.model)) return Response.json({ error: "Unknown model." }, { status: 400 });
+  try {
+    if (!(await isAllowedModel(b.model))) return Response.json({ error: "Unknown model." }, { status: 400 });
+    // Only forward keys the model's schema declares; fal validates the values themselves.
+    const allowed = new Set((await fields(b.model)).map((f) => f.key));
+    const input = Object.fromEntries(Object.entries(b.input || {}).filter(([k]) => allowed.has(k)));
+    const { request_id } = await fal.queue.submit(b.model, { input });
+    return Response.json({ request_id });
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function GET(req) {
+  const err = auth();
+  if (err) return err;
+  const { searchParams } = new URL(req.url);
+  const model = searchParams.get("model");
+  const requestId = searchParams.get("id");
+  if (!model || !requestId) return Response.json({ error: "Bad request." }, { status: 400 });
 
   try {
-    const { data } = await fal.subscribe(b.model, { input: buildInput(b.model, prompt, b.values) });
-    return Response.json(data);
+    if (!(await isAllowedModel(model))) return Response.json({ error: "Unknown model." }, { status: 400 });
+    const { status, queue_position } = await fal.queue.status(model, { requestId });
+    if (status !== "COMPLETED") return Response.json({ status, queue_position });
+    const { data } = await fal.queue.result(model, { requestId });
+    return Response.json({ status, data });
   } catch (e) {
-    return Response.json({ error: e.body?.detail ? JSON.stringify(e.body.detail) : e.message }, { status: e.status || 500 });
+    return fail(e);
   }
 }
