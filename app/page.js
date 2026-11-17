@@ -32,6 +32,16 @@ async function download(url, name) {
   }
 }
 
+// Google Images result links point at a web page; the real file is in the imgurl param.
+function directUrl(s) {
+  try {
+    const u = new URL(s);
+    return (/google\./.test(u.hostname) && u.searchParams.get("imgurl")) || s;
+  } catch {
+    return s;
+  }
+}
+
 function Preview({ url, accept }) {
   const t = accept?.split("/")[0];
   if (t === "image") return <img src={url} alt="" className="thumb" />;
@@ -66,8 +76,9 @@ function FileField({ f, value, onChange, multiple }) {
           {busy ? "Uploading…" : multiple ? "Add files" : "Upload"}
           <input type="file" accept={f.accept} multiple={multiple} onChange={pick} hidden disabled={busy} />
         </label>
-        {!multiple && <input type="text" value={value} onChange={(e) => onChange(e.target.value)} placeholder="…or paste a URL" />}
+        {!multiple && <input type="text" value={value} onChange={(e) => onChange(directUrl(e.target.value))} placeholder="…or paste a direct file URL" />}
       </div>
+      {f.required && !urls.length && <span className="hint">This model needs this file. No file? Use a “text → …” model instead.</span>}
       {err && <span className="error small">{err}</span>}
       {urls.map((u, i) => (
         <div key={u + i} className="filepreview">
@@ -185,9 +196,9 @@ export default function Home() {
     return inMedia.filter((m) => (!cat || m.cat === cat) && (!q || `${m.name} ${m.id} ${m.desc}`.toLowerCase().includes(q)));
   }, [inMedia, cat, query]);
 
-  // Default to the first (most popular) model in the tab.
+  // Default to the most popular text-only model in the tab (no input file needed).
   useEffect(() => {
-    if (inMedia.length && !inMedia.some((m) => m.id === model?.id)) pick(inMedia[0]);
+    if (inMedia.length && !inMedia.some((m) => m.id === model?.id)) pick(inMedia.find((m) => m.cat.startsWith("text-to")) || inMedia[0]);
   }, [inMedia]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function pick(m) {
